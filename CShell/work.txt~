@@ -1,0 +1,527 @@
+hai how are you
+#include "headers.h"
+void addCommand(char *command, int numArgs);
+void pastevent(int numArgs, char *args[]);
+void executeCommand(char **args, bool background);
+struct BackgroundProcess {
+    pid_t pid;
+    char command[1024]; // Adjust the size as needed
+};
+struct BackgroundProcess background_processes[MAX_BACKGROUND_PROCESSES];
+int background_process_count = 0;
+void shellworking(int argc, char *argv) {
+    char prev_dir[MAX_INPUT_SIZE];
+    char prev2_dir[MAX_INPUT_SIZE];
+    char input[4096];
+    strcpy(input, argv);
+    strcpy(prev_dir, "/");
+    getcwd(prev_dir, sizeof(prev_dir));
+    getcwd(prev2_dir, sizeof(prev2_dir));
+    bool background = false;
+    char *input_ptr = input;
+    addCommand(argv, argc);
+    int f=0;
+    char *command = strtok(input_ptr, ";");
+    while (command != NULL) {
+        char *args[MAX_ARGS];
+        int argCount = 0;
+        char *arg = strtok(command, " \t\n");
+        while (arg != NULL) {
+            args[argCount++] = arg;
+            arg = strtok(NULL, " \t\n");
+        }
+        args[argCount] = NULL;
+        if (argCount > 0) {
+            if (strcmp(args[0], "warp") == 0) {
+                if (argCount == 1) {
+                    warp("~", prev_dir, prev2_dir);
+                } else {
+                    for (int i = 1; i < argCount; i++) {
+                        if (strncmp(args[i], ";", 1) == 0) break;
+                        warp(args[i], prev_dir, prev2_dir);
+                    }
+                }
+            } 
+            else if (strcmp(args[0], "seek") == 0) {
+            bool searchFiles = true;
+    bool searchDirectories = true;
+    bool isExecute = false;
+    const char *search = NULL;
+    const char *targetDir = "."; // Default target directory is current directory
+
+    if (argCount < 2) {
+        printf("Usage: seek [-d | -f | -e] <search> [target_directory]\n");
+        return ;
+    }
+
+    for (int i = 1; i < argCount; i++) {
+        if (strcmp(args[i], "-d") == 0) {
+            searchFiles = false;
+        } else if (strcmp(args[i], "-f") == 0) {
+            searchDirectories = false;
+        } else if (strcmp(args[i], "-e") == 0) {
+            isExecute = true;
+        } else {
+            if (search == NULL) {
+                search = args[i];
+                continue;
+            } else if (search!=NULL) {
+                targetDir = args[i];
+            }
+        }
+        if (searchFiles==false && searchDirectories==false) {printf("Invalid Flags\n");return ;}
+    }
+    seekCommand(search, targetDir, searchFiles, searchDirectories, isExecute, true);
+        }
+            else if (strcmp(args[0], "proclore") == 0) {
+            if (argCount == 1) {
+                pid_t shell_pid = getpid();
+                procloreCommand(shell_pid);
+            } else if (argCount == 2) {
+                pid_t pid = atoi(args[1]);
+                procloreCommand(pid);
+            } else {
+                printf("Usage: proclore [pid]\n");
+            }
+        } else if (strcmp(args[0], "peek") == 0) {
+                peek(argCount, args);
+            } else if (strcmp(args[0], "pastevents") == 0) {
+                pastevent(argCount, args);
+            } else if (strcmp(args[argCount - 1], "&") == 0) {
+                background = true;
+                args[argCount - 1] = NULL; // Remove the '&' from args
+            }
+            else{
+            executeCommand(args, background);}
+            if (background) {
+                executeCommand(args, background);
+            }
+        } else {
+          printf("%s does not exist\n",args[0]);   
+        }
+        command = strtok(NULL, ";");
+        displayEndedBackgroundProcesses();   
+    }
+}
+void executeCommand(char **args, bool background) {
+    pid_t pid = fork();
+    struct timeval start_time, end_time;
+    if (pid == 0) {
+        // Child process
+        gettimeofday(&start_time, NULL);
+        execvp(args[0], args);
+        gettimeofday(&end_time, NULL);
+        double elapsed_time = (end_time.tv_sec - start_time.tv_sec) + (end_time.tv_usec - start_time.tv_usec) / 1e6;
+        if (elapsed_time > 2.0) {
+                elapsed_time=(int)elapsed_time;
+                //printprompt(args[0],elapsed_time);
+        }
+         printf("%s does not exist\n",args[0]);  
+        exit(EXIT_FAILURE);
+    } else if (pid > 0) {
+        // Parent process
+        if (background) {
+            if (background_process_count < MAX_BACKGROUND_PROCESSES) {
+                background_processes[background_process_count].pid = pid;
+                snprintf(background_processes[background_process_count].command, sizeof(background_processes[background_process_count].command), "%s", args[0]);
+                background_process_count++;
+                printf("%d\n", pid);
+            } else {
+                printf("Maximum background processes reached.\n");
+            }
+        } else {
+            int status;
+            waitpid(pid, &status, 0);
+        }
+    } else {
+        perror("Forking failed");
+    }
+}
+void displayEndedBackgroundProcesses() {
+    int status;
+    for (int i = 0; i < background_process_count; i++) {
+        pid_t pid = background_processes[i].pid;
+        if (waitpid(pid, &status, WNOHANG) == pid) {
+            if (WIFEXITED(status)) {
+                printf("%s exited normally.(%d)\n",  background_processes[i].command,pid);
+            } else if (WIFSIGNALED(status)) {
+                 printf("%s exited abnormally.(%d)\n",  background_processes[i].command,pid);
+            }
+        }
+    }
+}
+
+
+
+
+#include "activities.h"
+// Function to check if a process is spawned by the shell
+int isShellProcess(const char *pid_str, const char *shell_name) {
+    char cmdline_path[MAX_PROCESS_NAME];
+    char cmdline[MAX_PROCESS_NAME];
+
+    snprintf(cmdline_path, sizeof(cmdline_path), "/proc/%s/cmdline", pid_str);
+
+    FILE *file = fopen(cmdline_path, "r");
+    if (file == NULL) {
+        return 0; // Process not found or not accessible
+    }
+
+    fgets(cmdline, sizeof(cmdline), file);
+    fclose(file);
+
+    // Check if the command line contains the shell name or identifier
+    return strstr(cmdline, shell_name) != NULL;
+}
+
+void listProcesses(const char *shell_name) {
+    printf("Processes spawned by your shell:\n");
+
+    DIR *dir = opendir("/proc");
+    if (dir == NULL) {
+        perror("Error opening /proc");
+        exit(EXIT_FAILURE);
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir))) {
+        // Check if the entry is a directory representing a process (PID)
+        if (entry->d_type == DT_DIR) {
+            const char *pid_str = entry->d_name;
+
+            // Check if the process is spawned by the shell
+            if (isShellProcess(pid_str, shell_name)) {
+                char stat_path[MAX_PROCESS_NAME];
+                char cmd[MAX_PROCESS_NAME];
+                char state;
+
+                snprintf(stat_path, sizeof(stat_path), "/proc/%s/stat", pid_str);
+
+                FILE *file = fopen(stat_path, "r");
+                if (file == NULL) {
+                    continue; // Skip inaccessible processes
+                }
+
+                fscanf(file, "%*d %s %c", cmd, &state);
+                fclose(file);
+
+                printf("[%s] : %s - %s\n", pid_str, cmd, (state == 'R') ? "Running" : "Stopped");
+            }
+        }
+    }
+
+    closedir(dir);
+}
+// Function to retrieve the name of the shell based on its PID
+char* getShellName() {
+    pid_t pid = getpid();
+
+    char cmdline_path[MAX_PROCESS_NAME];
+    char cmdline[MAX_PROCESS_NAME];
+
+    // Construct the path to the cmdline file for the shell's PID in /proc
+    snprintf(cmdline_path, sizeof(cmdline_path), "/proc/%d/cmdline", pid);
+
+    FILE *file = fopen(cmdline_path, "r");
+    if (file == NULL) {
+        perror("Error opening /proc cmdline file");
+        exit(EXIT_FAILURE);
+    }
+
+    // Read the content of the cmdline file, which contains the command line used to launch the shell
+    fgets(cmdline, sizeof(cmdline), file);
+    fclose(file);
+
+    // Extract the shell name from the cmdline (usually the last part)
+    char *shell_name = strrchr(cmdline, '/');
+    if (shell_name != NULL) {
+        shell_name++; // Skip the '/' character
+        return shell_name;
+    } else {
+        printf("Shell name not found.\n");
+    }
+}
+void activities() {
+    const char *shell_name = "a.out"; // Replace with your shell's name or identifier
+    listProcesses(shell_name);
+    return ;
+}
+
+
+
+
+
+#include "activities.h"
+// Function to list all child processes of the current process
+void listChildProcesses(int parentPID) {
+    DIR *procDir;
+    struct dirent *entry;
+
+    char parentPIDStr[20];
+    snprintf(parentPIDStr, sizeof(parentPIDStr), "%d", parentPID);
+
+    if ((procDir = opendir("/proc")) == NULL) {
+        perror("opendir");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Child Processes of PID %d:\n", parentPID);
+
+    while ((entry = readdir(procDir)) != NULL) {
+        if (entry->d_type == DT_DIR && atoi(entry->d_name) != 0) {
+            char statusPath[MAX_PROCESS_NAME];
+            char cmd[MAX_PROCESS_NAME];
+            char state;
+            snprintf(statusPath, sizeof(statusPath), "/proc/%s/status", entry->d_name);
+            FILE *statusFile = fopen(statusPath, "r");
+            if (statusFile) {
+                char line[128];
+                while (fgets(line, sizeof(line), statusFile)) {
+                    if (strncmp(line, "PPid:", 5) == 0) {
+                       if (strncmp(line, "Name:", 5) == 0) {
+                        // Extract the command name
+                        sscanf(line, "Name:\t%s", cmd);
+                    } 
+                        int ppid = atoi(line + 6);
+                        if (ppid == parentPID) {
+                        	fscanf(statusFile, "%*d %s %c", cmd, &state);
+							printf("[%s] : %s - %s\n", entry->d_name, cmd, (state == 'R') ? "Running" : "Stopped");
+                            break;
+                        }
+                    }
+                }
+                fclose(statusFile);
+            }
+        }
+    }
+
+    closedir(procDir);
+}
+
+void activities() {
+    pid_t parentPID = getpid();
+
+    // Create child processes using fork, exec, or execvp
+/*    for (int i = 0; i < 3; i++) {
+        pid_t childPID = fork();
+        if (childPID == -1) {
+            perror("fork");
+            exit(EXIT_FAILURE);
+        } else if (childPID == 0) {
+            // Child process
+            if (i == 0) {
+                // Using execvp
+                char *args[] = {"ls", "-l", NULL};
+                execvp("ls", args);
+                perror("execvp");
+            } else if (i == 1) {
+                // Using exec
+                execl("/bin/pwd", "pwd", NULL);
+                perror("execl");
+            } else {
+                // Using exec
+                execl("/bin/ps", "ps", NULL);
+                perror("execl");
+            }
+            exit(EXIT_FAILURE);
+        } else {
+            // Parent process
+            wait(NULL); // Wait for the child process to complete
+        }
+    }
+*/
+    listChildProcesses(parentPID);
+
+    return ;
+}
+
+
+
+
+#include "headers.h"
+void addCommand(char *command, int numArgs);
+void pastevent(int numArgs, char *args[],char *home_directory);
+struct timeval start_time, end_time;
+char prev_dir[MAX_INPUT_SIZE];
+ bool background = false;
+void shellworking(int argc, char *argv,char *home_directory) {
+    int f=0;
+    
+}
+
+        char *arg = strtok(command, "|");
+        while (arg != NULL) {
+            args[argCount++] = arg;
+            arg = strtok(NULL, "|");
+        }
+        
+        
+        
+        
+        
+        
+void handleSignal(int pid, int signalNumber) {
+    int result = kill(pid, signalNumber);
+    if (result == 0) {
+        printf("Sent signal %d to process with pid %d\n", signalNumber, pid);
+    } else {
+        printf("Failed Signals");
+    }
+}
+void ping(int c,char *args[] , char *home_directory,int input_pipe,int output_pipe)
+{
+    int signo;
+    int pid=atoi(args[1]);
+    signo=atoi(args[2])%32;
+    if(c!=3)
+        printf("Error: Incorrect number of arguments\n");
+    else
+    {
+    	if (check_process(pid)==0){printf("Error : No such process found\n");}
+        else
+        	handleSignal(pid, signo);
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <dirent.h>
+#include <unistd.h>
+
+#define ANSI_COLOR_GREEN "\x1b[32m"
+#define ANSI_COLOR_BLUE "\x1b[34m"
+#define ANSI_COLOR_RESET "\x1b[0m"
+
+void seekCommand(const char *search, const char *targetDir, bool isFile, bool isDir, bool isexec, int topLevel, int input_pipe, int output_pipe, const char *currentDir);
+
+void seek(const char *search, const char *targetDir, bool isFile, bool isDir, bool isexec) {
+    char currentDir[1024];
+    if (getcwd(currentDir, sizeof(currentDir)) == NULL) {
+        perror("getcwd");
+        return;
+    }
+    
+    seekCommand(search, targetDir, isFile, isDir, isexec, true, -1, -1, currentDir);
+}
+
+void seekCommand(const char *search, const char *targetDir, bool isFile, bool isDir, bool isexec, int topLevel, int input_pipe, int output_pipe, const char *currentDir) {
+    DIR *dir = opendir(targetDir);
+    if (dir == NULL) {
+        perror("Error opening directory");
+        return;
+    }
+    
+    struct dirent *entry;
+    int found = 0;
+    
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] != '.') {  // Exclude hidden files/dirs
+            int isMatching = 0;
+            if ((isFile && entry->d_type == DT_REG) || (isDir && entry->d_type == DT_DIR)) {
+                char str[200];
+                strcpy(str, entry->d_name);
+                char *dotPosition = strchr(str, '.');
+                if (dotPosition != NULL) {
+                    *dotPosition = '\0';
+                }
+                if (strcmp(str, search) == 0) {
+                    if (entry->d_type == DT_DIR) {
+                        printf(ANSI_COLOR_BLUE "%s/%s\n" ANSI_COLOR_RESET, targetDir, entry->d_name);
+                        char nextPath[1024];
+                        snprintf(nextPath, sizeof(nextPath), "%s/%s", targetDir, entry->d_name);
+                        seekCommand(search, nextPath, isFile, isDir, isexec, false, input_pipe, output_pipe, currentDir);
+                    } else {
+                        printf(ANSI_COLOR_GREEN "%s/%s\n" ANSI_COLOR_RESET, targetDir, entry->d_name);
+                    }
+                    isMatching = 1;
+                    found += 1;
+                    char cwd[1024];
+                    getcwd(cwd, sizeof(cwd));
+                    chdir(currentDir); // Restore the original working directory
+                    if (isexec && entry->d_type == DT_DIR) {
+                        if (access(entry->d_name, X_OK) == 0) {
+                            chdir(entry->d_name);
+                            printf("Changed working directory to %s\n", entry->d_name);
+                            closedir(dir);
+                            return;
+                        } else {
+                            printf("Missing permissions for task!\n");
+                        }
+                    }
+                    if (isexec && entry->d_type == DT_REG) {
+                        // Print content of the file
+                        FILE *file = fopen(entry->d_name, "r");
+                        if (file != NULL) {
+                            char buffer[1024];
+                            while (fgets(buffer, sizeof(buffer), file) != NULL) {
+                                printf("%s", buffer);
+                            }
+                            fclose(file);
+                            closedir(dir);
+                            chdir(cwd); // Restore the original working directory
+                            return;
+                        } else {
+                            printf("Error opening file!\n");
+                        }
+                    }
+                }
+            }
+
+            if (!isMatching && entry->d_type == DT_DIR) {
+                char nextPath[1024];
+                snprintf(nextPath, sizeof(nextPath), "%s/%s", targetDir, entry->d_name);
+                seekCommand(search, nextPath, isFile, isDir, isexec, false, input_pipe, output_pipe, currentDir);
+            }
+        }
+    }
+
+    closedir(dir);
+    
+    if (topLevel && !found) {
+        printf("No match found!\n");
+    }
+    
+    if (output_pipe != -1) {
+        dup2(output_pipe, STDOUT_FILENO);
+        close(output_pipe);
+    }
+    
+    // Read from the input pipe if there is a valid input pipe
+    if (input_pipe != -1) {
+        dup2(input_pipe, STDIN_FILENO);
+        close(input_pipe);
+    }
+}
+
+int main(int argc, char *argv[]) {
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s <search> [targetDir]\n", argv[0]);
+        return 1;
+    }
+
+    const char *search = argv[1];
+    const char *targetDir = (argc >= 3) ? argv[2] : ".";
+    
+    seek(search, targetDir, false, false, false);
+
+    return 0;
+}
+
+

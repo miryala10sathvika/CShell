@@ -1,0 +1,16 @@
+wc	<work.txt	>	a.txt
+wc<a.txt
+wc	<	a.txt
+warp ~
+echo "Hello world" > newfile.txt
+cat newfile.txt
+echo hello
+echo "hello"
+echo ha
+wc
+warp .
+ heeeeeee
+      hoooooooooooo
+exit
+warp -
+exit
